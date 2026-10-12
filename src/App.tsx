@@ -37,7 +37,7 @@ export default function App() {
           <div className="flex items-center gap-2 font-semibold text-indigo-700">
             <ShieldCheck className="h-5 w-5" /> MRV CodeHub
             <span className="ml-2 rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
-              {user.role === "admin" ? "Admin" : "Student"}
+              {user.role === "admin" ? "Admin" : user.role === "teacher" ? "Teacher" : "Student"}
             </span>
           </div>
           <div className="flex items-center gap-4 text-sm">
@@ -49,7 +49,7 @@ export default function App() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-6">
-        {user.role === "admin" ? <AdminDashboard /> : <StudentHome />}
+        {user.role === "student" ? <StudentHome /> : <AdminDashboard canEditPolicies={user.role === "admin"} />}
       </main>
     </div>
   );

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import { authMiddleware, loadSecret, loginRateLimiter, signToken, verifyPassword } from "./auth.js";
-import { HttpError } from "./contestService.js";
+import { backfillResults, HttpError } from "./contestService.js";
 import { openDb } from "./db.js";
 import { adminRouter } from "./routes/admin.js";
 import { studentRouter } from "./routes/student.js";
@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export function createApp({ dbFile, dataDir } = {}) {
   const resolvedDataDir = dataDir || process.env.DATA_DIR || path.join(__dirname, "data");
   const db = openDb(dbFile || process.env.DB_FILE || path.join(resolvedDataDir, "codehub.db"));
+  backfillResults(db);
   const secret = loadSecret(resolvedDataDir);
   const requireAuth = authMiddleware(db, secret);
 
