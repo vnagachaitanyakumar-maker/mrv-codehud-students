@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft, Ban, CheckCircle2, Clock, Maximize, ShieldAle
 import { api, ApiError } from "@/lib/api";
 import type { ContestSummary, Session, SessionPayload, ViolationResult, ViolationType } from "@/lib/types";
 import { useContestGuard } from "./useContestGuard";
+import ResultSummary from "@/components/ResultSummary";
 
 type Phase = "gate" | "active" | "ended";
 
@@ -231,6 +232,7 @@ export default function ContestRoom({ contest, onExit }: { contest: ContestSumma
             <dt>Contest</dt><dd className="font-medium text-slate-900">{contest.title}</dd>
             <dt>Terminated at</dt><dd className="font-medium text-slate-900">{session.endedAt && new Date(session.endedAt).toLocaleString()}</dd>
           </dl>
+          <div className="mt-4"><ResultSummary session={session} /></div>
           <p className="mt-4 text-sm text-slate-600">
             The timer has been stopped and the answers you entered before the violation have been saved.
             This session is locked: answers cannot be modified and the contest cannot be resumed. Contact your
@@ -246,7 +248,8 @@ export default function ContestRoom({ contest, onExit }: { contest: ContestSumma
       <div className="mx-auto max-w-xl rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
         <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
         <h1 className="mt-4 text-xl font-semibold">{session.statusLabel}</h1>
-        <p className="mt-2 text-slate-600">Score: <span className="font-semibold">{session.score} / {session.maxScore}</span></p>
+        <p className="mt-1 text-sm text-slate-500">{contest.title}</p>
+        <div className="mt-4"><ResultSummary session={session} /></div>
         <button onClick={onExit} className="mt-6 inline-flex items-center gap-1 rounded-md bg-slate-800 px-4 py-2 text-sm text-white">
           <ArrowLeft className="h-4 w-4" /> Back to contests
         </button>

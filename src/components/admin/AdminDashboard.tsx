@@ -1,16 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, AlertOctagon, Ban, RefreshCw, Users, X } from "lucide-react";
+import { Activity, AlertOctagon, Ban, GraduationCap, Percent, RefreshCw, Users, X } from "lucide-react";
 import { api } from "@/lib/api";
-import type { AdminSession, Overview, Policy, SessionStatus, Violation } from "@/lib/types";
+import type { ActivityItem, AdminSession, LiveData, Overview, Policy, SessionStatus, Violation } from "@/lib/types";
 import StatusBadge from "@/components/StatusBadge";
+import ResultSummary, { formatDuration } from "@/components/ResultSummary";
+import { fmt, Stat, Table } from "./ui";
+import { ActivityList, LiveExams, NOTIFY_EVENTS, NotificationBell, ResultsPanel, StudentsPanel, Toasts } from "./MonitoringPanels";
 
 const POLL_MS = 3000;
-type Tab = "incidents" | "sessions" | "policies";
+const TOAST_MS = 8000;
+type Tab = "live" | "results" | "students" | "activity" | "incidents" | "sessions" | "policies";
+const TAB_LABELS: Record<Tab, string> = {
+  live: "Live monitoring",
+  results: "Results",
+  students: "Students & history",
+  activity: "Activity log",
+  incidents: "Violation incidents",
+  sessions: "All sessions",
+  policies: "Violation policies",
+};
 
-const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 
-export default function AdminDashboard() {
-  const [tab, setTab] = useState<Tab>("incidents");
+export default function AdminDashboard({ canEditPolicies }: { canEditPolicies: boolean }) {
+  const [tab, setTab] = useState<Tab>("live");
+  const [live, setLive] = useState<LiveData | null>(null);
+  const [results, setResults] = useState<AdminSession[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [notifications, setNotifications] = useState<ActivityItem[]>([]);
+  const [toasts, setToasts] = useState<ActivityItem[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [pollCount, setPollCount] = useState(0);
+  const latestActivityRef = useRef<number | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [violations, setViolations] = useState<Violation[]>([]);
   const [sessions, setSessions] = useState<AdminSession[]>([]);
@@ -27,11 +47,29 @@ export default function AdminDashboard() {
       const vQuery = new URLSearchParams({ limit: "200" });
       if (typeFilter) vQuery.set("type", typeFilter);
       const sQuery = statusFilter ? `?status=${statusFilter}` : "";
-      const [ov, v, s] = await Promise.all([
+      const [ov, v, s, lv, rs, act] = await Promise.all([
         api<Overview>("/admin/overview"),
         api<{ violations: Violation[] }>(`/admin/violations?${vQuery}`),
         api<{ sessions: AdminSession[] }>(`/admin/sessions${sQuery}`),
+        api<LiveData>("/admin/live"),
+        api<{ results: AdminSession[] }>("/admin/results"),
+        api<{ activity: ActivityItem[] }>("/admin/activity?limit=200"),
       ]);
+      const prevActivity = latestActivityRef.current;
+      if (prevActivity !== null) {
+        const news = act.activity.filter((a) => a.id > prevActivity && NOTIFY_EVENTS.has(a.event)).reverse();
+        if (news.length) {
+          setNotifications((n) => [...news.slice().reverse(), ...n].slice(0, 100));
+          setUnread((u) => u + news.length);
+          setToasts((t) => [...t, ...news].slice(-5));
+          news.forEach((a) => setTimeout(() => setToasts((t) => t.filter((x) => x.id !== a.id)), TOAST_MS));
+        }
+      }
+      latestActivityRef.current = Math.max(prevActivity ?? 0, ov.latestActivityId, act.activity[0]?.id ?? 0);
+      setLive(lv);
+      setResults(rs.results);
+      setActivity(act.activity);
+      setPollCount((c) => c + 1);
       if (latestIdRef.current !== null) {
         const fresh = v.violations.filter((x) => x.id > latestIdRef.current!).map((x) => x.id);
         if (fresh.length) setFreshIds(new Set(fresh));
@@ -56,32 +94,40 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Contest Integrity Dashboard</h1>
+        <h1 className="text-xl font-semibold">Exam Monitoring Dashboard</h1>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span className={`h-2 w-2 rounded-full ${pollError ? "bg-red-500" : "animate-pulse bg-emerald-500"}`} />
           {pollError ? `Update failed: ${pollError}` : `Live · polling every ${POLL_MS / 1000}s`}
           {lastUpdated && <span>· updated {lastUpdated.toLocaleTimeString()}</span>}
           <button onClick={poll} className="rounded p-1 hover:bg-slate-200" title="Refresh now"><RefreshCw className="h-3.5 w-3.5" /></button>
+          <NotificationBell items={notifications} unread={unread} onOpen={() => setUnread(0)} />
         </div>
       </div>
 
       {overview && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="overview">
+        <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6" data-testid="overview">
           <Stat icon={<AlertOctagon className="h-5 w-5 text-amber-600" />} label="Total violations" value={overview.totalViolations} sub={`${overview.violationsLast24h} in last 24h`} />
           <Stat icon={<Ban className="h-5 w-5 text-red-600" />} label="Terminated sessions" value={overview.terminatedSessions} />
           <Stat icon={<Activity className="h-5 w-5 text-blue-600" />} label="Active sessions" value={overview.activeSessions} />
           <Stat icon={<Users className="h-5 w-5 text-emerald-600" />} label="Completed sessions" value={overview.completedSessions} />
+          <Stat icon={<GraduationCap className="h-5 w-5 text-indigo-600" />} label="Students" value={overview.totalStudents} />
+          <Stat icon={<Percent className="h-5 w-5 text-slate-600" />} label="Average score" value={overview.averagePercentage == null ? "—" : `${overview.averagePercentage}%`} />
         </div>
       )}
 
       <div className="flex gap-1 border-b border-slate-200">
-        {(["incidents", "sessions", "policies"] as Tab[]).map((t) => (
+        {(Object.keys(TAB_LABELS) as Tab[]).filter((t) => t !== "policies" || canEditPolicies).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium capitalize ${tab === t ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
-            {t === "incidents" ? "Violation incidents" : t === "sessions" ? "Sessions" : "Violation policies"}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
+
+      {tab === "live" && <LiveExams data={live} onOpen={setDetailId} />}
+      {tab === "results" && <ResultsPanel results={results} onOpen={setDetailId} />}
+      {tab === "students" && <StudentsPanel refreshKey={pollCount} onOpen={setDetailId} />}
+      {tab === "activity" && <ActivityList items={activity} />}
 
       {tab === "incidents" && (
         <div className="space-y-3">
@@ -131,31 +177,9 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {tab === "policies" && <PolicyEditor />}
-      {detailId !== null && <SessionDetail id={detailId} onClose={() => setDetailId(null)} />}
-    </div>
-  );
-}
-
-function Stat({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: number; sub?: string }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-2 text-sm text-slate-500">{icon}{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-      {sub && <div className="text-xs text-slate-500">{sub}</div>}
-    </div>
-  );
-}
-
-function Table({ headers, rows, empty }: { headers: string[]; rows: React.ReactNode[]; empty: string }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-          <tr>{headers.map((h, i) => <th key={i} className="px-3 py-2 font-medium">{h}</th>)}</tr>
-        </thead>
-        <tbody>{rows.length ? rows : <tr><td colSpan={headers.length} className="px-3 py-6 text-center text-slate-500">{empty}</td></tr>}</tbody>
-      </table>
+      {tab === "policies" && canEditPolicies && <PolicyEditor />}
+      {detailId !== null && <SessionDetail id={detailId} refreshKey={pollCount} onClose={() => setDetailId(null)} />}
+      <Toasts toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>
   );
 }
@@ -218,20 +242,21 @@ interface Detail {
   answers: { questionId: number; position: number; prompt: string; answer: string | null; correctAnswer: string | null; points: number; updatedAt: string | null }[];
   violations: Violation[];
   studentHistory: Violation[];
+  activity: ActivityItem[];
 }
 
-function SessionDetail({ id, onClose }: { id: number; onClose: () => void }) {
+function SessionDetail({ id, refreshKey, onClose }: { id: number; refreshKey: number; onClose: () => void }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api<Detail>(`/admin/sessions/${id}`).then(setDetail).catch((e) => setError(e.message));
-  }, [id]);
+  }, [id, refreshKey]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-6" onClick={onClose}>
       <div className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Session #{id} incident report</h2>
+          <h2 className="text-lg font-semibold">Exam attempt #{id}</h2>
           <button onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
@@ -244,7 +269,10 @@ function SessionDetail({ id, onClose }: { id: number; onClose: () => void }) {
               <div>Score: {detail.session.score == null ? "—" : `${detail.session.score}/${detail.session.maxScore}`}</div>
               <div>Started: {fmt(detail.session.startedAt)}</div>
               <div>Ended: {fmt(detail.session.endedAt)}</div>
+              <div>Answered: {detail.session.answeredCount}/{detail.session.totalQuestions}</div>
+              <div>Time remaining: {formatDuration(detail.session.timeRemainingSeconds)}</div>
             </div>
+            <ResultSummary session={detail.session} />
             {detail.session.terminationReason && <p className="rounded bg-red-50 px-3 py-2 text-red-800">{detail.session.terminationReason}</p>}
             <section>
               <h3 className="mb-2 font-semibold">Violations in this session</h3>
@@ -258,13 +286,17 @@ function SessionDetail({ id, onClose }: { id: number; onClose: () => void }) {
               )}
             </section>
             <section>
-              <h3 className="mb-2 font-semibold">Saved answers (locked)</h3>
+              <h3 className="mb-2 font-semibold">{detail.session.status === "in_progress" ? "Saved answers (live)" : "Saved answers (locked)"}</h3>
               <ul className="space-y-1">{detail.answers.map((a) => (
                 <li key={a.questionId} className="rounded border border-slate-200 px-3 py-2">
                   <div className="text-slate-500">Q{a.position}. {a.prompt}</div>
                   <div>Answer: <strong>{a.answer ?? "— (not answered)"}</strong> <span className="text-xs text-slate-500">correct: {a.correctAnswer}</span></div>
                 </li>
               ))}</ul>
+            </section>
+            <section>
+              <h3 className="mb-2 font-semibold">Activity timeline</h3>
+              <ActivityList items={detail.activity} compact />
             </section>
             <section>
               <h3 className="mb-2 font-semibold">Student incident history ({detail.studentHistory.length})</h3>

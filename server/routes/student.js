@@ -56,6 +56,17 @@ export function studentRouter(db) {
     });
   });
 
+  r.get("/history", (req, res) => {
+    const ids = db.prepare("SELECT id FROM contest_sessions WHERE student_id = ? ORDER BY started_at DESC").all(req.user.id);
+    const titles = new Map(db.prepare("SELECT id, title FROM contests").all().map((c) => [c.id, c.title]));
+    res.json({
+      attempts: ids.map(({ id }) => {
+        const s = serializeSession(loadSession(db, id));
+        return { ...s, contestTitle: titles.get(s.contestId) };
+      }),
+    });
+  });
+
   r.post("/contests/:id/start", (req, res) => {
     const { session, resumed } = startSession(db, req.params.id, req.user, { fullscreen: req.body?.fullscreen });
     res.status(resumed ? 200 : 201).json({ ...sessionPayload(session), resumed });
