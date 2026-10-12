@@ -32,6 +32,13 @@ export default function ContestRoom({ contest, onExit }: { contest: ContestSumma
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
 
   const armedRef = useRef(false);
   const answersRef = useRef(answers);
@@ -195,8 +202,19 @@ export default function ContestRoom({ contest, onExit }: { contest: ContestSumma
     if (phase === "active" && remaining <= 0 && !locked) submit(true);
   }, [phase, remaining, locked, submit]);
 
+  async function reenterFullscreen() {
+    try {
+      await document.documentElement.requestFullscreen();
+      setError(null);
+    } catch {
+      setError("Fullscreen could not be enabled. Please allow fullscreen to continue the contest.");
+    }
+  }
+
+  const inputsDisabled = locked || !isFullscreen;
+
   function setAnswer(questionId: number, value: string) {
-    if (locked || phase !== "active") return;
+    if (inputsDisabled || phase !== "active") return;
     dirtyRef.current.add(questionId);
     setAnswers((a) => ({ ...a, [questionId]: value }));
   }
@@ -267,6 +285,21 @@ export default function ContestRoom({ contest, onExit }: { contest: ContestSumma
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-50 select-none" data-testid="contest-room">
+      {!isFullscreen && !locked && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/80 p-6" data-testid="fullscreen-required">
+          <div className="max-w-md rounded-xl bg-white p-6 text-center shadow-xl">
+            <Maximize className="mx-auto h-10 w-10 text-indigo-600" />
+            <h2 className="mt-3 text-lg font-semibold">Fullscreen required</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              You left fullscreen mode. This has been recorded. Your answers are locked until you return to fullscreen.
+            </p>
+            <button onClick={reenterFullscreen}
+              className="mt-4 inline-flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 font-medium text-white hover:bg-indigo-700">
+              <Maximize className="h-4 w-4" /> Re-enter fullscreen
+            </button>
+          </div>
+        </div>
+      )}
       <div className="sticky top-0 z-10 border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
           <div>
@@ -295,20 +328,20 @@ export default function ContestRoom({ contest, onExit }: { contest: ContestSumma
               <div className="mt-3 space-y-2">
                 {q.options!.map((opt) => (
                   <label key={opt} className="flex cursor-pointer items-center gap-2 text-sm">
-                    <input type="radio" name={`q${q.id}`} value={opt} disabled={locked}
+                    <input type="radio" name={`q${q.id}`} value={opt} disabled={inputsDisabled}
                       checked={answers[q.id] === opt} onChange={() => setAnswer(q.id, opt)} />
                     {opt}
                   </label>
                 ))}
               </div>
             ) : (
-              <textarea value={answers[q.id] ?? ""} disabled={locked} onChange={(e) => setAnswer(q.id, e.target.value)}
+              <textarea value={answers[q.id] ?? ""} disabled={inputsDisabled} onChange={(e) => setAnswer(q.id, e.target.value)}
                 data-testid={`answer-${q.id}`} rows={3}
                 className="mt-3 w-full rounded-md border border-slate-300 p-2 text-sm select-text focus:border-indigo-500 focus:outline-none disabled:bg-slate-100" />
             )}
           </div>
         ))}
-        <button onClick={() => submit(false)} disabled={locked}
+        <button onClick={() => submit(false)} disabled={inputsDisabled}
           className="rounded-md bg-emerald-600 px-5 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
           Submit contest
         </button>
